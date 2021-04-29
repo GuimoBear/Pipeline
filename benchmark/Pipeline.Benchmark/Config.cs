@@ -12,7 +12,7 @@ namespace Pipeline.Benchmark
 {
     public class Config : ManualConfig
     {
-        public const int Iterations = 20;
+        public const int Iterations = 2000;
 
         public Config()
         {
@@ -36,7 +36,7 @@ namespace Pipeline.Benchmark
                    .WithLaunchCount(1)
                    .WithWarmupCount(2)
                    .WithUnrollFactor(Iterations)
-                   .WithIterationCount(2)
+                   .WithIterationCount(10)
             );
             Orderer = new DefaultOrderer(SummaryOrderPolicy.FastestToSlowest);
             Options |= ConfigOptions.JoinSummary;

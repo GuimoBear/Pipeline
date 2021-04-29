@@ -59,10 +59,13 @@ namespace Pipeline.Benchmark.Implementations
                 if (!_middlewareExecutorsCache.TryGetValue(middlewareType, out var middlewareExecutor))
                 {
                     var middlewareInstance = services.GetService(middlewareType);
-                    middlewareExecutor = middlewareType.GetMethod("Invoke", new Type[] { messageContextType, typeof(Func<Task>) }).CreateDelegate<Func<object, Func<Task>, Task>>(middlewareInstance);
+                    var method = middlewareType.GetMethod("Invoke", new Type[] { messageContextType, typeof(Func<Task>) });
+                    var @delegate = method.CreateDelegate(typeof(Func<,,>).MakeGenericType(messageContextType, typeof(Func<Task>), typeof(Task)), middlewareInstance);
+                    
+                    middlewareExecutor = (obj, next) => @delegate.DynamicInvoke(obj, next) as Task;
                     _middlewareExecutorsCache.TryAdd(middlewareType, middlewareExecutor);
                 }
-                yield return (obj, next) => middlewareExecutor(obj, next);
+                yield return (obj, next) =>  middlewareExecutor(obj, next);
             }
         }
     }
