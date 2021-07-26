@@ -11,50 +11,58 @@ namespace Pipeline.Benchmark.Implementations
     {
         private readonly IReadOnlyList<Type> _middlewareTypes;
 
-        public ReflectionPipeline(IReadOnlyList<Type> middlewareTypes)
+        public ReflectionPipeline(IReadOnlyList<Type> middlewareTypes, Type messageType)
         {
             _middlewareTypes = middlewareTypes.Reverse().ToList();
+            GetExecutor(typeof(MessageContext<>).MakeGenericType(messageType));
         }
 
-        public async Task Execute(Type messageType, object message, IServiceProvider services, Func<object, Task> last)
+        public async Task Execute(object message, IServiceProvider services)
         {
             var ctx = CreateContext(message, services);
-            Func<object, Task> source = async context => await last((context as MessageContextBase).GetMessageObject());
-
-            var middlewareExecutors = CreateMiddlewareExecutors(services, messageType);
-
-            foreach (var middlewareExecutor in middlewareExecutors)
-                source = CreatePipelineLevelExecutor(source, middlewareExecutor);
-            await source(ctx);
+            await GetExecutor(ctx.GetType())(ctx);
         }
 
-        private Func<object, Task> CreatePipelineLevelExecutor(Func<object, Task> source, Func<object, Func<Task>, Task> current)
+        private Func<MessageContextBase, Task> _executor = null;
+
+        private Func<MessageContextBase, Task> GetExecutor(Type contextType)
+        {
+            if (_executor is null)
+            {
+                Func<MessageContextBase, Task> source = _ => Task.CompletedTask;
+                foreach (var middlewareExecutor in CreateMiddlewareExecutors(contextType))
+                    source = CreatePipelineLevelExecutor(source, middlewareExecutor);
+                _executor = source;
+            }
+            return _executor;
+        }
+
+        private Func<MessageContextBase, Task> CreatePipelineLevelExecutor(Func<MessageContextBase, Task> source, Func<MessageContextBase, Func<Task>, Task> current)
         {
             return async context => await current(context, async () => await source(context));
         }
 
-        private static readonly ConcurrentDictionary<Type, MethodInfo> _contextConstructorsCache
-            = new ConcurrentDictionary<Type, MethodInfo>();
+        private static readonly ConcurrentDictionary<Type, ConstructorInfo> _contextConstructorsCache
+            = new ();
 
         private static readonly ConcurrentDictionary<Type, MethodInfo> _middlewareExecutorsCache
-            = new ConcurrentDictionary<Type, MethodInfo>();
+            = new ();
 
-        private static object CreateContext(object message, IServiceProvider services)
+        private static MessageContextBase CreateContext(object message, IServiceProvider services)
         {
             var messageType = message.GetType();
             if (!_contextConstructorsCache.TryGetValue(messageType, out var constructor))
             {
                 var messageContextType = typeof(MessageContext<>).MakeGenericType(messageType);
-                var parameters = new Type[] { typeof(object), typeof(IServiceProvider) };
-                constructor = messageContextType.GetMethod("Create", parameters);
+                var parameters = new Type[] { messageType, typeof(IServiceProvider) };
+                constructor = messageContextType.GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance, null, parameters, null);
                 _contextConstructorsCache.TryAdd(messageType, constructor);
             }
-            return constructor.Invoke(null, new object[] { message, services });
+            return constructor.Invoke(new object[] { message, services }) as MessageContextBase;
         }
 
-        private IEnumerable<Func<object, Func<Task>, Task>> CreateMiddlewareExecutors(IServiceProvider services, Type messageType)
+        private IEnumerable<Func<MessageContextBase, Func<Task>, Task>> CreateMiddlewareExecutors(Type messageContextType)
         {
-            var messageContextType = typeof(MessageContext<>).MakeGenericType(messageType);
             foreach (var middlewareType in _middlewareTypes)
             {
                 if (!_middlewareExecutorsCache.TryGetValue(middlewareType, out var middlewareExecutor))
@@ -62,7 +70,7 @@ namespace Pipeline.Benchmark.Implementations
                     middlewareExecutor = middlewareType.GetMethod("Invoke", new Type[] { messageContextType, typeof(Func<Task>) });
                     _middlewareExecutorsCache.TryAdd(middlewareType, middlewareExecutor);
                 }
-                yield return (obj, next) => middlewareExecutor.Invoke(services.GetService(middlewareType), new object[] { obj, next }) as Task;
+                yield return async (obj, next) => await (middlewareExecutor.Invoke(obj.Services.GetService(middlewareType), new object[] { obj, next }) as Task);
             }
         }
     }

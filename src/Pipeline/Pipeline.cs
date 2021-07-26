@@ -27,7 +27,7 @@ namespace Pipeline
         public async Task Execute(Type messageType, object message, IServiceProvider services, Func<object, Task> last)
         {
             var ctx = PipelineExpressionFactory.GetMessagecontextConstructor(messageType)(message, services);
-            Func<object, Task> source = async context => await last((context as MessageContextBase).GetMessageObject());
+            Func<object, Task> source = last;
 
             var middlewareExecutors = CreateMiddlewareExecutors(services, messageType);
 

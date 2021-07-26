@@ -5,20 +5,20 @@ using System.Threading.Tasks;
 
 namespace Pipeline.Benchmark
 {
-    [Description("Scoped typed delegate")]
-    public class ScopedDelegatePipelineBenchmark : BenchmarkBase
+    [Description("ILGenerator")]
+    public class ILGeneratorPipelineBenchmark : BenchmarkBase
     {
-        private ScopedMiddlewareTypedDelegatePipeline<Message> pipeline;
+        private ILGeneratorPipeline pipeline;
 
         [GlobalSetup]
         public void Setup()
         {
             BaseSetup();
-            pipeline = new ScopedMiddlewareTypedDelegatePipeline<Message>(middlewareTypes);
+            pipeline = new ILGeneratorPipeline(middlewareTypes, typeof(Message));
         }
 
-        [Benchmark(Description = "Scoped typed delegate pipeline executor")]
-        public async Task<Message> ExecuteTypedDelegatePipeline()
+        [Benchmark(Description = "ILGenerator pipeline executor")]
+        public async Task<Message> ILGeneratorPipelineExecutor()
         {
             using var scope = scopeFactory.CreateScope();
             var message = new Message();

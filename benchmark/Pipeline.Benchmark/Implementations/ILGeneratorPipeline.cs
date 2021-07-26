@@ -1,36 +1,39 @@
-﻿using System;
+﻿using Sigil;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
-using Sigil;
 
 namespace Pipeline.Benchmark.Implementations
 {
-    internal class DelegatePipeline
+    internal class ILGeneratorPipeline
     {
         private readonly IReadOnlyList<Type> _middlewareTypes;
+        private readonly Type _messageType;
 
-        public DelegatePipeline(IReadOnlyList<Type> middlewareTypes)
+        public ILGeneratorPipeline(IReadOnlyList<Type> middlewareTypes, Type messageType)
         {
             _middlewareTypes = middlewareTypes.Reverse().ToList();
+            _messageType = messageType;
+            GetExecutor(typeof(MessageContext<>).MakeGenericType(_messageType));
         }
 
         public async Task Execute(object message, IServiceProvider services)
         {
             var ctx = CreateContext(message.GetType(), message, services);
-            await GetExecutor(ctx.GetType(), services)(ctx);
+            await GetExecutor(ctx.GetType())(ctx);
         }
 
         private Func<MessageContextBase, Task> _executor = null;
 
-        private Func<MessageContextBase, Task> GetExecutor(Type contextType, IServiceProvider services)
+        private Func<MessageContextBase, Task> GetExecutor(Type contextType)
         {
             if (_executor is null)
             {
                 _executor = _ => Task.CompletedTask;
-                foreach (var middlewareExecutor in CreateMiddlewareExecutors(services, contextType))
+                foreach (var middlewareExecutor in CreateMiddlewareExecutors(contextType))
                     _executor = CreatePipelineLevelExecutor(_executor, middlewareExecutor);
             }
             return _executor;
@@ -41,11 +44,8 @@ namespace Pipeline.Benchmark.Implementations
             return async context => await current(context, async () => await source(context));
         }
 
-        private static readonly ConcurrentDictionary<Type, Func<object, Func<Task>, Task>> _middlewareExecutorsCache
-            = new ConcurrentDictionary<Type, Func<object, Func<Task>, Task>>();
-
-        private static readonly ConcurrentDictionary<Type, Func<object, IServiceProvider, MessageContextBase>> _constructorDelegates
-            = new ();
+        private static readonly IDictionary<Type, Func<object, IServiceProvider, MessageContextBase>> _constructorDelegates
+            = new ConcurrentDictionary<Type, Func<object, IServiceProvider, MessageContextBase>>();
 
         private static MessageContextBase CreateContext(Type messageType, object message, IServiceProvider services)
         {
@@ -66,25 +66,37 @@ namespace Pipeline.Benchmark.Implementations
                     .Return()
                     .CreateDelegate();
 
-                _constructorDelegates.TryAdd(messageType, ctor);
+                _constructorDelegates.Add(messageType, ctor);
             }
             return ctor(message, services);
         }
 
-        private IEnumerable<Func<MessageContextBase, Func<Task>, Task>> CreateMiddlewareExecutors(IServiceProvider services, Type messageContextType)
+        private static readonly ConcurrentDictionary<Type, Func<object, MessageContextBase, Func<Task>, Task>> _middlewareExecutorsCache
+            = new();
+
+        private IEnumerable<Func<MessageContextBase, Func<Task>, Task>> CreateMiddlewareExecutors(Type messageContextType)
         {
             foreach (var middlewareType in _middlewareTypes)
             {
-                if (!_middlewareExecutorsCache.TryGetValue(middlewareType, out var middlewareExecutor))
+                if (!_middlewareExecutorsCache.TryGetValue(middlewareType, out var middlewareInvokeDelegate))
                 {
-                    var middlewareInstance = services.GetService(middlewareType);
-                    var method = middlewareType.GetMethod("Invoke", new Type[] { messageContextType, typeof(Func<Task>) });
-                    var @delegate = method.CreateDelegate(typeof(Func<,,>).MakeGenericType(messageContextType, typeof(Func<Task>), typeof(Task)), middlewareInstance);
-                    
-                    middlewareExecutor = (obj, next) => @delegate.DynamicInvoke(obj, next) as Task;
-                    _middlewareExecutorsCache.TryAdd(middlewareType, middlewareExecutor);
+                    var middlewareExecutor = middlewareType.GetMethod("Invoke", new Type[] { messageContextType, typeof(Func<Task>) });
+
+                    var emmiter = Emit<Func<object, MessageContextBase, Func<Task>, Task>>
+                        .NewDynamicMethod($"{middlewareType.Name}_Invoke")
+                        .LoadArgument(0)
+                        .CastClass(middlewareType)
+                        .LoadArgument(1)
+                        .CastClass(messageContextType)
+                        .LoadArgument(2)
+                        .Call(middlewareExecutor)
+                        .Return();
+
+                    middlewareInvokeDelegate = emmiter.CreateDelegate();
+
+                    _middlewareExecutorsCache.TryAdd(middlewareType, middlewareInvokeDelegate);
                 }
-                yield return (obj, next) => middlewareExecutor(obj, next);
+                yield return async (obj, next) => await middlewareInvokeDelegate(obj.Services.GetService(middlewareType), obj, next);
             }
         }
     }

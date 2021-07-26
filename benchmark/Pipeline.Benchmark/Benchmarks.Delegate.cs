@@ -18,16 +18,12 @@ namespace Pipeline.Benchmark
         }
 
         [Benchmark(Description = "Delegate pipeline executor")]
-        public async Task<MessageContext<Message>> ExecuteDelegatePipeline()
+        public async Task<Message> ExecuteReflectionPipeline()
         {
             using var scope = scopeFactory.CreateScope();
-            MessageContext<Message> context = null;
-            await pipeline.Execute(typeof(Message), new Message(), scope.ServiceProvider, _ctx =>
-            {
-                context = _ctx as MessageContext<Message>;
-                return Task.CompletedTask;
-            });
-            return context;
+            var message = new Message();
+            await pipeline.Execute(message, scope.ServiceProvider);
+            return message;
         }
     }
 }

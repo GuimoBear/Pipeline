@@ -12,18 +12,26 @@ namespace Pipeline.Benchmark.Implementations
         public ScopedMiddlewareTypedDelegatePipeline(IReadOnlyList<Type> middlewareTypes)
         {
             _middlewareTypes = middlewareTypes.Reverse().ToList();
+            GetExecutor(typeof(MessageContext<>).MakeGenericType(typeof(TMessage)));
         }
 
-        public async Task Execute(Type messageType, TMessage message, IServiceProvider services, Func<MessageContext<TMessage>, Task> last)
+        public async Task Execute(TMessage message, IServiceProvider services)
         {
             var ctx = CreateContext(message, services);
-            Func<MessageContext<TMessage>, Task> source = last;
+            await GetExecutor(ctx.GetType())(ctx);
+        }
 
-            var middlewareExecutors = CreateMiddlewareExecutors(services, messageType);
+        private Func<MessageContext<TMessage>, Task> _executor = null;
 
-            foreach (var middlewareExecutor in middlewareExecutors)
-                source = CreatePipelineLevelExecutor(source, middlewareExecutor);
-            await source(ctx);
+        private Func<MessageContext<TMessage>, Task> GetExecutor(Type contextType)
+        {
+            if (_executor is null)
+            {
+                _executor = _ => Task.CompletedTask;
+                foreach (var middlewareExecutor in CreateMiddlewareExecutors())
+                    _executor = CreatePipelineLevelExecutor(_executor, middlewareExecutor);
+            }
+            return _executor;
         }
 
         private Func<MessageContext<TMessage>, Task> CreatePipelineLevelExecutor(Func<MessageContext<TMessage>, Task> source, Func<MessageContext<TMessage>, Func<Task>, Task> current)
@@ -32,12 +40,12 @@ namespace Pipeline.Benchmark.Implementations
         }
 
         private static MessageContext<TMessage> CreateContext(TMessage message, IServiceProvider services)
-            => new MessageContext<TMessage>(message, services);
+            => MessageContext<TMessage>.Create(message, services);
 
-        private IEnumerable<Func<MessageContext<TMessage>, Func<Task>, Task>> CreateMiddlewareExecutors(IServiceProvider services, Type messageType)
+        private IEnumerable<Func<MessageContext<TMessage>, Func<Task>, Task>> CreateMiddlewareExecutors()
         {
             foreach (var middlewareType in _middlewareTypes)
-                yield return (services.GetService(middlewareType) as IMiddleware<TMessage>).Invoke;
+                yield return (ctx, next) =>  (ctx.Services.GetService(middlewareType) as IMiddleware<TMessage>).Invoke(ctx, next);
         }
     }
 }

@@ -5,19 +5,24 @@ namespace Pipeline
 {
     public abstract class MessageContextBase
     {
+        public IServiceProvider Services { get; }
+
+        protected MessageContextBase(IServiceProvider services)
+        {
+            Services = services;
+        }
+
         public abstract object GetMessageObject();
     }
 
     public class MessageContext<TMessage> : MessageContextBase
     {
         public TMessage Message { get; }
-        public IServiceProvider Services { get; }
         public IDictionary<string, object> Items { get; } = new Dictionary<string, object>();
 
-        public MessageContext(TMessage message, IServiceProvider services)
+        private MessageContext(TMessage message, IServiceProvider services) : base(services)
         {
             Message = message;
-            Services = services;
         }
 
         public override object GetMessageObject()

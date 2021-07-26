@@ -14,20 +14,16 @@ namespace Pipeline.Benchmark
         public void Setup()
         {
             BaseSetup();
-            pipeline = new ReflectionPipeline(middlewareTypes);
+            pipeline = new ReflectionPipeline(middlewareTypes, typeof(Message));
         }
 
         [Benchmark(Description = "Reflection pipeline executor")]
-        public async Task<MessageContext<Message>> ExecuteReflectionPipeline()
+        public async Task<Message> ExecuteReflectionPipeline()
         {
             using var scope = scopeFactory.CreateScope();
-            MessageContext<Message> context = null;
-            await pipeline.Execute(typeof(Message), new Message(), scope.ServiceProvider, _ctx =>
-            {
-                context = _ctx as MessageContext<Message>;
-                return Task.CompletedTask;
-            });
-            return context;
+            var message = new Message();
+            await pipeline.Execute(message, scope.ServiceProvider);
+            return message;
         }
     }
 }

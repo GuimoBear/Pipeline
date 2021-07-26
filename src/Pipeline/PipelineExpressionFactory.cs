@@ -8,10 +8,10 @@ namespace Pipeline
 {
     internal static class PipelineExpressionFactory
     {
-        private static readonly ConcurrentDictionary<Type, Func<object, IServiceProvider, object>> _messageContextConstructorCache =
+        private static readonly ConcurrentDictionary<Type, Func<object, IServiceProvider, MessageContextBase>> _messageContextConstructorCache =
             new();
 
-        public static Func<object, IServiceProvider, object> GetMessagecontextConstructor(Type messageType)
+        public static Func<object, IServiceProvider, MessageContextBase> GetMessagecontextConstructor(Type messageType)
         {
             if (!_messageContextConstructorCache.TryGetValue(messageType, out var lambda))
             {
@@ -19,7 +19,7 @@ namespace Pipeline
                 var parameters = new Type[] { typeof(object), typeof(IServiceProvider) };
                 var methodInfo = messageContextType.GetMethod("Create", parameters);
                 var parametersExpression = new ParameterExpression[] { Expression.Parameter(typeof(object)), Expression.Parameter(typeof(IServiceProvider)) };
-                lambda = Expression.Lambda<Func<object, IServiceProvider, object>>(Expression.Call(methodInfo, parametersExpression), parametersExpression).Compile();
+                lambda = Expression.Lambda<Func<object, IServiceProvider, MessageContextBase>>(Expression.Call(methodInfo, parametersExpression), parametersExpression).Compile();
                 _messageContextConstructorCache.TryAdd(messageType, lambda);
             }
             return lambda;
