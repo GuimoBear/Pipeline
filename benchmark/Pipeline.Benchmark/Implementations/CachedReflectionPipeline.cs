@@ -11,30 +11,26 @@ namespace Pipeline.Benchmark.Implementations
     {
         private readonly IReadOnlyList<Type> _middlewareTypes;
 
+        private readonly Func<MessageContextBase, Task> _executor = null;
+
         public CachedReflectionPipeline(IReadOnlyList<Type> middlewareTypes, Type messageType)
         {
             _middlewareTypes = middlewareTypes.Reverse().ToList();
-            GetExecutor(typeof(MessageContext<>).MakeGenericType(messageType));
+            _executor = GetExecutor(typeof(MessageContext<>).MakeGenericType(messageType));
         }
 
         public async Task Execute(object message, IServiceProvider services)
         {
             var ctx = CreateContext(message, services);
-            await GetExecutor(ctx.GetType())(ctx);
+            await _executor(ctx);
         }
-
-        private Func<MessageContextBase, Task> _executor = null;
 
         private Func<MessageContextBase, Task> GetExecutor(Type contextType)
         {
-            if (_executor is null)
-            {
-                Func<MessageContextBase, Task> source = _ => Task.CompletedTask;
-                foreach (var middlewareExecutor in CreateMiddlewareExecutors(contextType))
-                    source = CreatePipelineLevelExecutor(source, middlewareExecutor);
-                _executor = source;
-            }
-            return _executor;
+            Func<MessageContextBase, Task> source = _ => Task.CompletedTask;
+            foreach (var middlewareExecutor in CreateMiddlewareExecutors(contextType))
+                source = CreatePipelineLevelExecutor(source, middlewareExecutor);
+            return source;
         }
 
         private Func<MessageContextBase, Task> CreatePipelineLevelExecutor(Func<MessageContextBase, Task> source, Func<MessageContextBase, Func<Task>, Task> current)
